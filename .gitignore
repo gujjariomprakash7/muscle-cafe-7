@@ -1,0 +1,6 @@
+﻿venv/
+__pycache__/
+*.pyc
+muscle_cafe.db
+.env
+.streamlit/secrets.toml
