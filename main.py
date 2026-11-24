@@ -12,6 +12,8 @@ from database import (
     get_body_measurements,
     save_workout_log,
     get_workout_logs,
+    register_account,
+    authenticate_user,
 )
 from logic.workout import (
     generate_workout,
@@ -38,10 +40,139 @@ create_table()
 
 
 # -------------------------------------------------
+# VISUAL DESIGN SYSTEM + CHART HELPERS
+# -------------------------------------------------
+CHART_COLORS = [
+    "#B7F34A", "#22D3EE", "#A78BFA", "#FB7185", "#F59E0B",
+    "#34D399", "#60A5FA", "#F472B6", "#C084FC", "#F97316",
+]
+
+PLOTLY_CONFIG = {
+    "displayModeBar": True,
+    "displaylogo": False,
+    "scrollZoom": True,
+    "responsive": True,
+}
+
+def style_figure(fig, height=360):
+    """Apply a consistent dark, high-contrast style to interactive Plotly charts."""
+    fig.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font={"family": "Inter, Segoe UI, sans-serif", "color": "#E8EDF2", "size": 12},
+        title={"font": {"size": 17, "color": "#F8FAFC"}, "x": 0.02, "xanchor": "left"},
+        margin={"l": 18, "r": 18, "t": 58, "b": 24},
+        height=height,
+        hoverlabel={"bgcolor": "#17232D", "font": {"color": "#FFFFFF"}},
+        legend={"orientation": "h", "yanchor": "bottom", "y": 1.02, "xanchor": "right", "x": 1},
+        hovermode="x unified",
+    )
+    fig.update_xaxes(showgrid=False, zeroline=False, linecolor="rgba(148,163,184,0.18)")
+    fig.update_yaxes(showgrid=True, gridcolor="rgba(148,163,184,0.15)", zeroline=False)
+    return fig
+
+def filter_chart_period(frame, date_column, period):
+    """Filter a chart dataframe without changing the saved source records."""
+    if frame.empty or period == "All time":
+        return frame.copy()
+    result = frame.copy()
+    result[date_column] = pd.to_datetime(result[date_column])
+    days = 30 if period == "Last 30 days" else 90
+    cutoff = pd.Timestamp(date.today() - pd.Timedelta(days=days - 1))
+    return result[result[date_column] >= cutoff]
+
+st.markdown(
+    """
+    <style>
+      .stApp {
+        background: radial-gradient(circle at 8% 0%, rgba(34,211,238,.08), transparent 27%),
+                    radial-gradient(circle at 92% 4%, rgba(183,243,74,.07), transparent 25%),
+                    #111B24;
+      }
+      .block-container { padding-top: 1.65rem; padding-bottom: 3rem; max-width: 1480px; }
+      h1 { font-weight: 800 !important; letter-spacing: -.035em; }
+      h2, h3 { font-weight: 700 !important; letter-spacing: -.02em; }
+      [data-testid="stSidebar"] { background: linear-gradient(180deg, #17232D 0%, #111B24 100%); border-right: 1px solid rgba(148,163,184,.13); }
+      [data-testid="stMetric"] { background: linear-gradient(145deg, rgba(32,45,55,.96), rgba(25,38,48,.96)); border: 1px solid rgba(183,243,74,.18); padding: 15px 17px; border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,.12); }
+      [data-testid="stMetricLabel"] { color: #AFC0CB !important; }
+      [data-testid="stMetricValue"] { color: #F8FAFC !important; font-weight: 750; }
+      div[data-testid="stVerticalBlockBorderWrapper"] { border-color: rgba(148,163,184,.2); border-radius: 16px; }
+      .stButton > button, .stFormSubmitButton > button { border: 0; border-radius: 11px; background: linear-gradient(100deg, #B7F34A, #7DDC70); color: #14202A; font-weight: 750; transition: transform .15s ease, filter .15s ease; }
+      .stButton > button:hover, .stFormSubmitButton > button:hover { filter: brightness(1.06); transform: translateY(-1px); color: #101820; border: 0; }
+      .stDownloadButton > button { border-radius: 11px; border: 1px solid rgba(34,211,238,.55); color: #DFFBFF; background: rgba(34,211,238,.08); font-weight: 650; }
+      [data-testid="stExpander"] { border: 1px solid rgba(148,163,184,.18); border-radius: 14px; }
+      [data-testid="stDataFrame"] { border: 1px solid rgba(148,163,184,.16); border-radius: 12px; overflow: hidden; }
+      div[data-baseweb="select"] > div, div[data-baseweb="input"] > div, textarea { border-radius: 10px !important; }
+      .mc-eyebrow { color: #B7F34A; font-size: .76rem; font-weight: 800; letter-spacing: .16em; text-transform: uppercase; margin-bottom: .25rem; }
+      .mc-subtitle { color: #B5C2CC; font-size: .98rem; margin-top: -.45rem; margin-bottom: 1rem; }
+    </style>
+    <div class="mc-eyebrow">Muscle Cafe · Build Strength. Fuel Life.</div>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+# -------------------------------------------------
+# ACCOUNT SIGN-IN / REGISTRATION
+# -------------------------------------------------
+if "account_id" not in st.session_state:
+    st.markdown("# ☕ Welcome to Muscle Cafe")
+    st.markdown("Create an account or sign in to access your personal fitness space.")
+    login_tab, register_tab = st.tabs(["Sign in", "Create account"])
+
+    with login_tab:
+        with st.form("account_login_form"):
+            login_email = st.text_input("Email address", key="login_email").strip()
+            login_password = st.text_input("Password", type="password", key="login_password")
+            login_submitted = st.form_submit_button("Sign in", type="primary", use_container_width=True)
+
+        if login_submitted:
+            account = authenticate_user(login_email, login_password)
+            if account:
+                st.session_state["account_id"] = account["id"]
+                st.session_state["account_email"] = account["email"]
+                st.rerun()
+            else:
+                st.error("Email or password is incorrect. Please try again.")
+
+    with register_tab:
+        st.caption("Use an email address you can access. Passwords must be at least 8 characters.")
+        with st.form("account_register_form"):
+            register_email = st.text_input("Email address", key="register_email").strip()
+            register_password = st.text_input("Create password", type="password", key="register_password")
+            confirm_password = st.text_input("Confirm password", type="password", key="confirm_password")
+            register_submitted = st.form_submit_button("Create my account", type="primary", use_container_width=True)
+
+        if register_submitted:
+            if register_password != confirm_password:
+                st.error("The passwords do not match.")
+            else:
+                new_account_id, register_error = register_account(register_email, register_password)
+                if new_account_id is not None:
+                    st.session_state["account_id"] = new_account_id
+                    st.session_state["account_email"] = register_email.lower().strip()
+                    st.success("Account created. Welcome to Muscle Cafe!")
+                    st.rerun()
+                else:
+                    st.error(register_error or "Your account could not be created.")
+
+    st.info("Your profile, measurements and workout history are separated by account on this app instance.")
+    st.stop()
+
+account_id = int(st.session_state["account_id"])
+
+# -------------------------------------------------
 # SIDEBAR NAVIGATION
 # -------------------------------------------------
 st.sidebar.title("☕ Muscle Cafe")
 st.sidebar.caption("Build Strength. Fuel Life.")
+st.sidebar.caption(f"Signed in: {st.session_state.get('account_email', '')}")
+if st.sidebar.button("Log out", use_container_width=True):
+    # Clear widget state as well as credentials before another person signs in.
+    for state_key in list(st.session_state.keys()):
+        del st.session_state[state_key]
+    st.rerun()
 
 page = st.sidebar.radio(
     "Navigate",
@@ -56,9 +187,9 @@ if page == "Home":
     st.title("☕ Muscle Cafe Dashboard")
     st.caption("Build Strength. Fuel Life. Review your training and check-ins in one place.")
 
-    profile = get_latest_profile()
-    dashboard_body_records = get_body_measurements()
-    dashboard_workout_records = get_workout_logs()
+    profile = get_latest_profile(account_id)
+    dashboard_body_records = get_body_measurements(account_id)
+    dashboard_workout_records = get_workout_logs(account_id)
 
     if profile is None:
         st.info("Welcome to Muscle Cafe! Start by saving your fitness profile.")
@@ -107,40 +238,115 @@ if page == "Home":
         metric4.metric("Training days logged", training_days_count)
         st.caption(weight_change_text)
 
+        st.markdown("### Your training analytics")
+        control_col1, control_col2 = st.columns([1, 1])
+        with control_col1:
+            dashboard_period = st.selectbox(
+                "Chart time range", ["All time", "Last 30 days", "Last 90 days"],
+                key="dashboard_chart_period",
+            )
+        with control_col2:
+            activity_metric = st.selectbox(
+                "Compare training by", ["Working sets", "Exercise entries"],
+                key="dashboard_activity_metric",
+            )
+
+        body_chart_data = filter_chart_period(body_df_home, "entry_date", dashboard_period)
+        workout_chart_data = filter_chart_period(workout_df_home, "entry_date", dashboard_period)
+
         chart_col1, chart_col2 = st.columns(2)
         with chart_col1:
-            st.markdown("#### Body-weight trend")
-            if not body_df_home.empty:
+            st.markdown("#### ⚖️ Body-weight trend")
+            if not body_chart_data.empty:
                 weight_chart_home = px.line(
-                    body_df_home,
-                    x="entry_date",
-                    y="weight_kg",
-                    markers=True,
+                    body_chart_data, x="entry_date", y="weight_kg", markers=True,
+                    color_discrete_sequence=["#B7F34A"],
                     labels={"entry_date": "Date", "weight_kg": "Weight (kg)"},
+                    hover_data={"weight_kg": ":.1f"},
                 )
-                st.plotly_chart(weight_chart_home, use_container_width=True)
+                weight_chart_home.update_traces(line={"width": 3}, marker={"size": 9})
+                weight_chart_home = style_figure(weight_chart_home, 350)
+                st.plotly_chart(weight_chart_home, use_container_width=True, config=PLOTLY_CONFIG)
             else:
-                st.info("Your body-weight chart will appear after your first body check-in.")
+                st.info("Your body-weight chart will appear after a check-in in the selected period.")
 
         with chart_col2:
-            st.markdown("#### Workout entries by muscle group")
-            if not workout_df_home.empty:
-                group_counts = (
-                    workout_df_home.groupby("muscle_group", as_index=False)
-                    .size()
-                    .rename(columns={"size": "Exercise entries"})
-                    .sort_values("Exercise entries", ascending=False)
+            st.markdown("#### 🏋️ Training by muscle group")
+            if not workout_chart_data.empty:
+                if activity_metric == "Working sets":
+                    group_summary = (
+                        workout_chart_data.groupby("muscle_group", as_index=False)["sets"]
+                        .sum().rename(columns={"sets": "Value"})
+                    )
+                    metric_label = "Recorded working sets"
+                else:
+                    group_summary = (
+                        workout_chart_data.groupby("muscle_group", as_index=False)
+                        .size().rename(columns={"size": "Value"})
+                    )
+                    metric_label = "Exercise entries"
+                group_summary = group_summary.sort_values("Value", ascending=True)
+                group_bar = px.bar(
+                    group_summary, x="Value", y="muscle_group", orientation="h",
+                    color="muscle_group", color_discrete_sequence=CHART_COLORS,
+                    labels={"Value": metric_label, "muscle_group": "Muscle group"},
+                    hover_data={"Value": True, "muscle_group": False},
                 )
-                group_chart = px.bar(
-                    group_counts,
-                    x="muscle_group",
-                    y="Exercise entries",
-                    labels={"muscle_group": "Muscle group", "Exercise entries": "Logged entries"},
-                )
-                group_chart.update_layout(xaxis_title=None)
-                st.plotly_chart(group_chart, use_container_width=True)
+                group_bar.update_layout(showlegend=False, yaxis_title=None, xaxis_title=metric_label)
+                group_bar = style_figure(group_bar, 350)
+                st.plotly_chart(group_bar, use_container_width=True, config=PLOTLY_CONFIG)
             else:
                 st.info("Your training chart will appear after you log a workout.")
+
+        pie_col, activity_col = st.columns(2)
+        with pie_col:
+            st.markdown("#### 🍩 Training distribution")
+            if not workout_chart_data.empty:
+                distribution = (
+                    workout_chart_data.groupby("muscle_group", as_index=False)["sets"]
+                    .sum().rename(columns={"sets": "Working sets"})
+                )
+                distribution = distribution[distribution["Working sets"] > 0]
+                if not distribution.empty:
+                    distribution_pie = px.pie(
+                        distribution, names="muscle_group", values="Working sets", hole=0.58,
+                        color_discrete_sequence=CHART_COLORS,
+                        hover_data={"Working sets": True},
+                    )
+                    distribution_pie.update_traces(
+                        textposition="inside", textinfo="percent",
+                        hovertemplate="<b>%{label}</b><br>%{value} working sets<br>%{percent}<extra></extra>",
+                        marker={"line": {"color": "#111B24", "width": 2}},
+                    )
+                    distribution_pie = style_figure(distribution_pie, 360)
+                    distribution_pie.update_layout(showlegend=True, legend_title_text="Muscle group")
+                    st.plotly_chart(distribution_pie, use_container_width=True, config=PLOTLY_CONFIG)
+                else:
+                    st.info("No working-set totals are available for the selected period.")
+            else:
+                st.info("Log workouts to see your training distribution.")
+
+        with activity_col:
+            st.markdown("#### 📅 Training activity by day")
+            if not workout_chart_data.empty:
+                daily_activity = (
+                    workout_chart_data.assign(day=workout_chart_data["entry_date"].dt.strftime("%a"))
+                    .groupby("day", as_index=False).size()
+                    .rename(columns={"size": "Exercise entries"})
+                )
+                weekday_order = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+                daily_activity["day"] = pd.Categorical(daily_activity["day"], categories=weekday_order, ordered=True)
+                daily_activity = daily_activity.sort_values("day")
+                daily_bar = px.bar(
+                    daily_activity, x="day", y="Exercise entries",
+                    color="Exercise entries", color_continuous_scale=["#203542", "#22D3EE", "#B7F34A"],
+                    labels={"day": "Day", "Exercise entries": "Logged exercise entries"},
+                )
+                daily_bar.update_layout(coloraxis_showscale=False)
+                daily_bar = style_figure(daily_bar, 360)
+                st.plotly_chart(daily_bar, use_container_width=True, config=PLOTLY_CONFIG)
+            else:
+                st.info("Your weekly activity chart will appear after logging workouts.")
 
         st.divider()
         recent_col1, recent_col2 = st.columns(2)
@@ -264,7 +470,7 @@ elif page == "My Profile":
             }
 
             try:
-                save_profile(profile_data)
+                save_profile(profile_data, account_id)
                 st.success("Your profile has been saved successfully!")
             except Exception as error:
                 st.error(
@@ -275,7 +481,7 @@ elif page == "My Profile":
 
     st.divider()
     st.subheader("Saved Profile")
-    saved_profile = get_latest_profile()
+    saved_profile = get_latest_profile(account_id)
 
     if saved_profile is None:
         st.info("No profile has been saved yet.")
@@ -307,7 +513,7 @@ elif page == "Workout Planner":
         "exercise-learning notes."
     )
 
-    profile = get_latest_profile()
+    profile = get_latest_profile(account_id)
 
     if profile is None:
         st.warning("Please open My Profile and save your profile first.")
@@ -404,6 +610,32 @@ elif page == "Workout Planner":
                                     + ", ".join(exercise["alternatives"])
                                 )
 
+                    workout_chart_df = pd.DataFrame(workout_plan)
+                    st.markdown("#### 📊 Your session at a glance")
+                    workout_chart_col1, workout_chart_col2 = st.columns(2)
+                    with workout_chart_col1:
+                        movement_mix = (
+                            workout_chart_df.groupby("movement_type", as_index=False).size()
+                            .rename(columns={"size": "Exercises"})
+                        )
+                        movement_pie = px.pie(
+                            movement_mix, names="movement_type", values="Exercises", hole=0.58,
+                            color_discrete_sequence=["#B7F34A", "#22D3EE", "#A78BFA"],
+                            title="Movement mix",
+                        )
+                        movement_pie.update_traces(textposition="inside", textinfo="label+percent")
+                        st.plotly_chart(style_figure(movement_pie, 300), use_container_width=True, config=PLOTLY_CONFIG)
+                    with workout_chart_col2:
+                        exercise_volume = workout_chart_df[["name", "sets"]].copy()
+                        exercise_bar = px.bar(
+                            exercise_volume, x="sets", y="name", orientation="h",
+                            color="sets", color_continuous_scale=["#203542", "#22D3EE", "#B7F34A"],
+                            title="Planned working sets by exercise",
+                            labels={"sets": "Working sets", "name": "Exercise"},
+                        )
+                        exercise_bar.update_layout(coloraxis_showscale=False, yaxis={"categoryorder": "total ascending"})
+                        st.plotly_chart(style_figure(exercise_bar, 300), use_container_width=True, config=PLOTLY_CONFIG)
+
                     st.info(
                         "Use alternatives as substitutions, not as extra exercises. "
                         "Most muscle heads work together, so labels such as long-head "
@@ -435,7 +667,7 @@ elif page == "Weekly Plan":
         "and rest days."
     )
 
-    profile = get_latest_profile()
+    profile = get_latest_profile(account_id)
 
     if profile is None:
         st.warning("Please open My Profile and save your profile first.")
@@ -522,6 +754,26 @@ elif page == "Weekly Plan":
                         use_container_width=True,
                         hide_index=True,
                     )
+                    volume_chart_df = pd.DataFrame(volume_rows)
+                    if not volume_chart_df.empty and volume_chart_df["Planned direct sets/week"].sum() > 0:
+                        volume_chart_col1, volume_chart_col2 = st.columns(2)
+                        with volume_chart_col1:
+                            volume_bar = px.bar(
+                                volume_chart_df.sort_values("Planned direct sets/week"),
+                                x="Planned direct sets/week", y="Muscle group", orientation="h",
+                                color="Muscle group", color_discrete_sequence=CHART_COLORS,
+                                title="Weekly working sets by muscle",
+                            )
+                            volume_bar.update_layout(showlegend=False)
+                            st.plotly_chart(style_figure(volume_bar, 350), use_container_width=True, config=PLOTLY_CONFIG)
+                        with volume_chart_col2:
+                            volume_pie = px.pie(
+                                volume_chart_df, names="Muscle group", values="Planned direct sets/week",
+                                hole=0.58, color_discrete_sequence=CHART_COLORS,
+                                title="Share of planned weekly volume",
+                            )
+                            volume_pie.update_traces(textposition="inside", textinfo="percent")
+                            st.plotly_chart(style_figure(volume_pie, 350), use_container_width=True, config=PLOTLY_CONFIG)
 
                     st.subheader("Recovery days")
                     if plan["rest_days"]:
@@ -570,7 +822,7 @@ elif page == "Nutrition Planner":
         "values are estimates, not exact nutrition labels."
     )
 
-    profile = get_latest_profile()
+    profile = get_latest_profile(account_id)
 
     if profile is None:
         st.warning("Please open My Profile and save your profile first.")
@@ -626,6 +878,28 @@ elif page == "Nutrition Planner":
                     protein_col.metric("Approx. protein", f"{meal['protein_g']} g")
                     st.write(meal["foods"])
                     st.caption(meal["why"])
+
+            meal_chart_df = pd.DataFrame(nutrition_plan["meals"])
+            if not meal_chart_df.empty:
+                st.markdown("#### 🍽️ Protein across your sample meals")
+                meal_chart_col1, meal_chart_col2 = st.columns(2)
+                with meal_chart_col1:
+                    meal_protein_bar = px.bar(
+                        meal_chart_df, x="name", y="protein_g",
+                        color="name", color_discrete_sequence=CHART_COLORS,
+                        text="protein_g", title="Approximate protein per meal",
+                        labels={"name": "Meal", "protein_g": "Protein (g)"},
+                    )
+                    meal_protein_bar.update_traces(texttemplate="%{text} g", textposition="outside")
+                    meal_protein_bar.update_layout(showlegend=False)
+                    st.plotly_chart(style_figure(meal_protein_bar, 330), use_container_width=True, config=PLOTLY_CONFIG)
+                with meal_chart_col2:
+                    meal_protein_pie = px.pie(
+                        meal_chart_df, names="name", values="protein_g", hole=0.58,
+                        color_discrete_sequence=CHART_COLORS, title="Protein contribution by meal",
+                    )
+                    meal_protein_pie.update_traces(textposition="inside", textinfo="label+percent")
+                    st.plotly_chart(style_figure(meal_protein_pie, 330), use_container_width=True, config=PLOTLY_CONFIG)
 
             st.subheader("Optional protein add-on")
             booster_options = nutrition_plan["protein_boosters"]
@@ -700,9 +974,9 @@ elif page == "Progress Tracker":
         "useful than reacting to one day's changes."
     )
 
-    profile = get_latest_profile()
-    existing_measurements = get_body_measurements()
-    existing_logs = get_workout_logs()
+    profile = get_latest_profile(account_id)
+    existing_measurements = get_body_measurements(account_id)
+    existing_logs = get_workout_logs(account_id)
 
     default_weight = (
         float(existing_measurements[-1]["weight_kg"])
@@ -755,6 +1029,7 @@ elif page == "Progress Tracker":
     if body_submitted:
         try:
             save_body_measurement(
+                account_id=account_id,
                 entry_date=checkin_date,
                 weight_kg=checkin_weight,
                 waist_cm=waist_cm if waist_cm > 0 else None,
@@ -811,6 +1086,7 @@ elif page == "Progress Tracker":
         else:
             try:
                 save_workout_log(
+                    account_id=account_id,
                     entry_date=log_date,
                     muscle_group=log_muscle,
                     exercise_name=exercise_name,
@@ -825,8 +1101,8 @@ elif page == "Progress Tracker":
                 st.exception(error)
 
     # Reload after form submissions so new entries appear immediately.
-    body_records = get_body_measurements()
-    workout_records = get_workout_logs()
+    body_records = get_body_measurements(account_id)
+    workout_records = get_workout_logs(account_id)
 
     st.divider()
     st.subheader("3. Your body-weight trend")
@@ -848,14 +1124,13 @@ elif page == "Progress Tracker":
         )
 
         weight_chart = px.line(
-            body_df,
-            x="entry_date",
-            y="weight_kg",
-            markers=True,
+            body_df, x="entry_date", y="weight_kg", markers=True,
             title="Body weight over time",
+            color_discrete_sequence=["#B7F34A"],
             labels={"entry_date": "Date", "weight_kg": "Weight (kg)"},
         )
-        st.plotly_chart(weight_chart, use_container_width=True)
+        weight_chart.update_traces(line={"width": 3}, marker={"size": 9})
+        st.plotly_chart(style_figure(weight_chart, 390), use_container_width=True, config=PLOTLY_CONFIG)
 
         optional_columns = [
             column for column in ["waist_cm", "chest_cm", "arm_cm", "hip_cm"]
@@ -872,6 +1147,26 @@ elif page == "Progress Tracker":
             measurement_df = body_df[["entry_date"] + optional_columns].copy()
             measurement_df = measurement_df.rename(columns=pretty_names)
             st.dataframe(measurement_df, use_container_width=True, hide_index=True)
+
+        available_measurements = [
+            ("waist_cm", "Waist (cm)"), ("chest_cm", "Chest (cm)"),
+            ("arm_cm", "Upper arm (cm)"), ("hip_cm", "Hip (cm)"),
+        ]
+        available_measurements = [(col, label) for col, label in available_measurements if body_df[col].notna().any()]
+        if available_measurements:
+            selected_measurement = st.selectbox(
+                "Explore a measurement trend", [label for _, label in available_measurements],
+                key="measurement_trend_choice",
+            )
+            measurement_column = dict((label, col) for col, label in available_measurements)[selected_measurement]
+            measurement_history = body_df[body_df[measurement_column].notna()]
+            measurement_chart = px.area(
+                measurement_history, x="entry_date", y=measurement_column, markers=True,
+                title=f"{selected_measurement} over time",
+                color_discrete_sequence=["#22D3EE"],
+            )
+            measurement_chart.update_traces(line={"width": 3}, fillcolor="rgba(34,211,238,0.12)")
+            st.plotly_chart(style_figure(measurement_chart, 330), use_container_width=True, config=PLOTLY_CONFIG)
 
         display_body = body_df.sort_values(["entry_date", "id"], ascending=False).copy()
         display_body["entry_date"] = display_body["entry_date"].dt.strftime("%Y-%m-%d")
@@ -890,6 +1185,30 @@ elif page == "Progress Tracker":
         workout_df = pd.DataFrame(workout_records)
         workout_df["entry_date"] = pd.to_datetime(workout_df["entry_date"])
         unique_exercises = sorted(workout_df["exercise_name"].dropna().unique().tolist())
+        st.markdown("#### Training distribution")
+        workout_chart_col1, workout_chart_col2 = st.columns(2)
+        muscle_set_summary = (
+            workout_df.groupby("muscle_group", as_index=False)["sets"].sum()
+            .rename(columns={"sets": "Working sets"})
+        )
+        with workout_chart_col1:
+            training_pie = px.pie(
+                muscle_set_summary, names="muscle_group", values="Working sets",
+                hole=0.58, color_discrete_sequence=CHART_COLORS,
+                title="Logged working sets by muscle",
+            )
+            training_pie.update_traces(textposition="inside", textinfo="percent")
+            st.plotly_chart(style_figure(training_pie, 340), use_container_width=True, config=PLOTLY_CONFIG)
+        with workout_chart_col2:
+            training_bar = px.bar(
+                muscle_set_summary.sort_values("Working sets"),
+                x="Working sets", y="muscle_group", orientation="h",
+                color="muscle_group", color_discrete_sequence=CHART_COLORS,
+                title="Compare working sets",
+            )
+            training_bar.update_layout(showlegend=False, yaxis_title=None)
+            st.plotly_chart(style_figure(training_bar, 340), use_container_width=True, config=PLOTLY_CONFIG)
+
         selected_exercise = st.selectbox(
             "Choose an exercise to review",
             unique_exercises,
@@ -901,24 +1220,22 @@ elif page == "Progress Tracker":
         if (exercise_df["load_kg"] > 0).any():
             chart_df = exercise_df[exercise_df["load_kg"] > 0]
             performance_chart = px.line(
-                chart_df,
-                x="entry_date",
-                y="load_kg",
-                markers=True,
+                chart_df, x="entry_date", y="load_kg", markers=True,
                 title=f"Recorded load: {selected_exercise}",
+                color_discrete_sequence=["#A78BFA"],
                 labels={"entry_date": "Date", "load_kg": "Load (kg)"},
             )
-            st.plotly_chart(performance_chart, use_container_width=True)
+            performance_chart.update_traces(line={"width": 3}, marker={"size": 9})
+            st.plotly_chart(style_figure(performance_chart, 370), use_container_width=True, config=PLOTLY_CONFIG)
         else:
             performance_chart = px.line(
-                exercise_df,
-                x="entry_date",
-                y="reps",
-                markers=True,
+                exercise_df, x="entry_date", y="reps", markers=True,
                 title=f"Recorded reps: {selected_exercise}",
+                color_discrete_sequence=["#F59E0B"],
                 labels={"entry_date": "Date", "reps": "Reps"},
             )
-            st.plotly_chart(performance_chart, use_container_width=True)
+            performance_chart.update_traces(line={"width": 3}, marker={"size": 9})
+            st.plotly_chart(style_figure(performance_chart, 370), use_container_width=True, config=PLOTLY_CONFIG)
 
         total_entries = len(workout_df)
         training_days_logged = workout_df["entry_date"].dt.date.nunique()
